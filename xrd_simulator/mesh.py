@@ -42,7 +42,7 @@ class TetraMesh(object):
         Nodal coordinates, shape ``(n_nodes, 3)``. Each row defines the
         coordinates of a mesh node.
     enod : torch.Tensor
-        Tetra element nodes, shape ``(n_elm, n_nodes)``. ``enod[i, :]`` gives
+        Tetra element nodes, shape ``(n_elm, 4)``. ``enod[i, :]`` gives
         the nodal indices of element ``i``.
     dof : torch.Tensor
         Per node degrees of freedom. ``dof[i, :]`` gives the degrees of
@@ -94,7 +94,7 @@ class TetraMesh(object):
             Nodal coordinates, shape ``(n_nodes, 3)``. Each row defines the
             coordinates of a mesh node.
         enod : numpy.ndarray
-            Tetra element nodes, shape ``(n_elm, n_nodes)``. ``enod[i, :]``
+            Tetra element nodes, shape ``(n_elm, 4)``. ``enod[i, :]``
             gives the nodal indices of element ``i``.
 
         Returns
@@ -138,7 +138,7 @@ class TetraMesh(object):
             mesh generation fails.
         """
         from skimage import measure
-        
+
         # Create a grid to sample the level set
         # Use a reasonably fine grid to capture the surface accurately
         n = max(int(2 * bounding_radius / (max_cell_circumradius * 0.5)), 20)
@@ -146,12 +146,12 @@ class TetraMesh(object):
         y = np.linspace(-bounding_radius, bounding_radius, n, dtype=np.float64)
         z = np.linspace(-bounding_radius, bounding_radius, n, dtype=np.float64)
         X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
-        
+
         # Evaluate level set function on the grid
         points_grid = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
         values = np.array([level_set(p) for p in points_grid], dtype=np.float64)
         volume = values.reshape(X.shape)
-        
+
         # Extract the surface mesh using marching cubes at level=0
         # Note: marching_cubes extracts the surface where volume == level
         try:
@@ -164,28 +164,28 @@ class TetraMesh(object):
                 "This likely means the level set doesn't intersect the zero level "
                 "within the bounding box, or doesn't define a valid closed surface."
             )
-        
+
         # Transform vertices from grid coordinates to world coordinates and ensure float64
         verts = verts.astype(np.float64) + np.array([x[0], y[0], z[0]], dtype=np.float64)
         faces = faces.astype(np.int32)  # Ensure integer type for faces
-        
+
         # Verify we have a valid surface
         if len(verts) == 0 or len(faces) == 0:
             raise ValueError(
                 "Marching cubes produced no surface. "
                 "Check that the level set crosses zero within the bounding_radius."
             )
-        
+
         # Create mesh info for meshpy
         mesh_info = tet.MeshInfo()
         mesh_info.set_points(verts.tolist())
-        
+
         # Set the surface facets - these define the boundary
         mesh_info.set_facets(faces.tolist())
-        
+
         # Build the volume mesh with quality constraints
         max_volume = (max_cell_circumradius ** 3) / 6.0
-        
+
         try:
             mesh = tet.build(
                 mesh_info,
@@ -198,20 +198,20 @@ class TetraMesh(object):
                 "The surface may be self-intersecting or have other topological issues. "
                 "Try adjusting bounding_radius or max_cell_circumradius."
             )
-        
+
         # Convert to meshio format with explicit double precision
         vertices = np.array(mesh.points, dtype=np.float64)
         elements = np.array(mesh.elements, dtype=np.int64)
-        
+
         # Verify mesh generation succeeded
         if len(vertices) == 0 or len(elements) == 0:
             raise ValueError(
                 "Mesh generation produced no tetrahedra. "
                 "This may indicate an issue with the surface topology."
             )
-        
+
         mesh_obj = meshio.Mesh(vertices, [("tetra", elements)])
-        
+
         return cls._build_tetramesh(mesh_obj)
 
     def translate(self, translation_vector):
@@ -225,7 +225,7 @@ class TetraMesh(object):
         # Convert to numpy if torch tensor
         if torch.is_tensor(translation_vector):
             translation_vector = utils.ensure_numpy(translation_vector)
-        
+
         self._mesh.points += translation_vector
         self.coord = utils.ensure_torch(self._mesh.points, dtype=torch.float64)
         self.ecentroids += utils.ensure_torch(translation_vector, dtype=torch.float64)
@@ -291,7 +291,7 @@ class TetraMesh(object):
                     element_data[key] = [list(utils.ensure_numpy(element_data[key]))]
                 else:
                     element_data[key] = [list(element_data[key])]
-        
+
         # Convert coord and enod to numpy if they're torch tensors
         coord = utils.ensure_numpy(self.coord) if torch.is_tensor(self.coord) else self.coord
         enod = utils.ensure_numpy(self.enod) if torch.is_tensor(self.enod) else self.enod
@@ -336,10 +336,10 @@ class TetraMesh(object):
             A new mesh object with all data as torch tensors.
         """
         tetmesh = cls()
-        
+
         # Convert core mesh data to tensors immediately
         tetmesh.coord = utils.ensure_torch(mesh.points, dtype=torch.float64)
-        
+
         # Handle enod - ensure it's 2D
         enod_data = mesh.cells_dict["tetra"]
         enod_tensor = utils.ensure_torch(enod_data, dtype=torch.int64)
@@ -347,13 +347,13 @@ class TetraMesh(object):
         if enod_tensor.ndim == 1:
             enod_tensor = enod_tensor.reshape(1, -1)
         tetmesh.enod = enod_tensor
-        
+
         # Store tensor versions in _mesh for persistence
         tetmesh._mesh = meshio.Mesh(
             points=utils.ensure_numpy(tetmesh.coord),
             cells=[("tetra", utils.ensure_numpy(tetmesh.enod))]
         )
-        
+
         # Complete initialization using tensor data
         tetmesh._set_fem_matrices()
         tetmesh._expand_mesh_data()
@@ -380,9 +380,9 @@ class TetraMesh(object):
             enod = torch.tensor(enod, dtype=torch.int64)
         elif enod.dtype != torch.int64:
             enod = enod.to(dtype=torch.int64)
-            
+
         # Create permutations as long tensor
-        permutations = torch.tensor([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], 
+        permutations = torch.tensor([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
                                   dtype=torch.int64, device=enod.device)
         efaces = enod[:, permutations]
         return efaces
@@ -487,7 +487,7 @@ class TetraMesh(object):
         # Ensure inputs are torch tensors
         coord = utils.ensure_torch(coord, dtype=torch.float64)
         enod = utils.ensure_torch(enod, dtype=torch.int64)
-        
+
         vertices = coord[enod]
         n_tetra = enod.shape[0]
         pairs = torch.tensor(
@@ -568,18 +568,18 @@ class TetraMesh(object):
         """
         # Convert coordinates to float64 tensor
         self.coord = utils.ensure_torch(self._mesh.points, dtype=torch.float64)
-        
+
         # Convert element indices to long (int64) tensor for indexing
         self.enod = utils.ensure_torch(self._mesh.cells_dict["tetra"], dtype=torch.int64)
         if self.enod.dtype != torch.int64:
             self.enod = self.enod.to(dtype=torch.int64)
-            
+
         # Generate and convert DOF indices to long tensor
         self.dof = utils.ensure_torch(
-            np.arange(0, self.coord.shape[0] * 3).reshape(self.coord.shape[0], 3), 
+            np.arange(0, self.coord.shape[0] * 3).reshape(self.coord.shape[0], 3),
             dtype=torch.int64
         )
-        
+
         self.number_of_elements = self.enod.shape[0]
 
     def _expand_mesh_data(self):
@@ -588,7 +588,7 @@ class TetraMesh(object):
         self.efaces = self._compute_mesh_faces(self.enod)
         if self.efaces.dtype != torch.int64:
             self.efaces = self.efaces.to(dtype=torch.int64)
-            
+
         # Compute mesh normals and other geometric properties
         self.enormals = utils.ensure_torch(
             self._compute_mesh_normals(self.coord, self.enod, self.efaces),
@@ -598,12 +598,12 @@ class TetraMesh(object):
             self._compute_mesh_centroids(self.coord, self.enod),
             dtype=torch.float64
         )
-        
+
         # Compute bounding spheres
         eradius_np, espherecentroids_np = self._compute_mesh_spheres(self.coord, self.enod)
         self.eradius = utils.ensure_torch(eradius_np, dtype=torch.float64)
         self.espherecentroids = utils.ensure_torch(espherecentroids_np, dtype=torch.float64)
-        
+
         # Compute global properties
         self.centroid = torch.mean(self.ecentroids, dim=0)
         self.evolumes = utils.ensure_torch(

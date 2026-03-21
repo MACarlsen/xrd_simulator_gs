@@ -737,7 +737,7 @@ coordinates of a mesh node.</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="xrd_simulator.mesh.TetraMesh.enod">
 <span class="sig-name descname"><span class="pre">enod</span></span><a class="reference external" href="https://github.com/fable-3dxrd/xrd_simulator/blob/main/xrd_simulator/mesh.py/"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#xrd_simulator.mesh.TetraMesh.enod" title="Link to this definition"></a></dt>
-<dd><p>Tetra element nodes, shape <code class="docutils literal notranslate"><span class="pre">(n_elm,</span> <span class="pre">n_nodes)</span></code>. <code class="docutils literal notranslate"><span class="pre">enod[i,</span> <span class="pre">:]</span></code> gives
+<dd><p>Tetra element nodes, shape <code class="docutils literal notranslate"><span class="pre">(n_elm,</span> <span class="pre">4)</span></code>. <code class="docutils literal notranslate"><span class="pre">enod[i,</span> <span class="pre">:]</span></code> gives
 the nodal indices of element <code class="docutils literal notranslate"><span class="pre">i</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Type<span class="colon">:</span></dt>
@@ -858,7 +858,7 @@ element <code class="docutils literal notranslate"><span class="pre">i</span></c
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>coord</strong> (<em>numpy.ndarray</em>) – Nodal coordinates, shape <code class="docutils literal notranslate"><span class="pre">(n_nodes,</span> <span class="pre">3)</span></code>. Each row defines the
 coordinates of a mesh node.</p></li>
-<li><p><strong>enod</strong> (<em>numpy.ndarray</em>) – Tetra element nodes, shape <code class="docutils literal notranslate"><span class="pre">(n_elm,</span> <span class="pre">n_nodes)</span></code>. <code class="docutils literal notranslate"><span class="pre">enod[i,</span> <span class="pre">:]</span></code>
+<li><p><strong>enod</strong> (<em>numpy.ndarray</em>) – Tetra element nodes, shape <code class="docutils literal notranslate"><span class="pre">(n_elm,</span> <span class="pre">4)</span></code>. <code class="docutils literal notranslate"><span class="pre">enod[i,</span> <span class="pre">:]</span></code>
 gives the nodal indices of element <code class="docutils literal notranslate"><span class="pre">i</span></code>.</p></li>
 </ul>
 </dd>
