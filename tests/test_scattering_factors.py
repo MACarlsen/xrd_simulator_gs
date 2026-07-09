@@ -27,7 +27,7 @@ class TestLorentz(unittest.TestCase):
         rot_axis = torch.tensor([0.0, 0.0, 1.0])
         
         lorentz = _lorentz(k_in, k_out, rot_axis)
-        print(lorentz)
+
         # For 2theta=90°, theta=45°, sin(2theta)=1
         # eta is the angle between rotation axis and scattering plane normal
         # Lorentz should be finite and positive
