@@ -76,6 +76,24 @@ class TestLorentz(unittest.TestCase):
                        msg="Single vector input should return scalar")
         self.assertTrue(torch.isfinite(lorentz), msg="Lorentz factor should be finite")
 
+    def test_inclined_axis(self):
+        """Test Lorentz factor with inclined rotation axis."""
+
+        k_norm = 1e6
+        angle = 0.5
+
+        k_in = torch.tensor([1.0, 0.0, 0.0])*k_norm
+        k_out = torch.tensor([
+            [0.5, 0.5, 0.0],
+            [0.5, 0.3, 0.4],
+            [0.7, 0.7, 0.1],
+            [0.5, 0.0, 0.5],
+        ])
+        k_out = k_out / torch.linalg.norm(k_out, axis=1)[:, None]*k_norm
+        rot_axis = torch.tensor([np.sin(angle), 0.0, np.cos(angle)], dtype=torch.float32)
+        lorentz = _lorentz(k_in, k_out, rot_axis)
+        assert torch.allclose(lorentz, torch.tensor([1.6115, 2.6858, 1.6197, float("inf")]))
+
 
 class TestPolarization(unittest.TestCase):
     """Test the polarization factor calculation."""
