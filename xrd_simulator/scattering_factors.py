@@ -53,7 +53,7 @@ def _lorentz(
     condition = one_over_l > 1 / torch.sin(torch.deg2rad(tol))
     result = 1/one_over_l
     result = torch.where(condition, torch.tensor(float("inf")), result)
-    return result
+    return result.squeeze()
 
 
 def _polarization(k_out: torch.Tensor, pol_vec: torch.Tensor) -> torch.Tensor | float:
