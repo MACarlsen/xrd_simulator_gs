@@ -37,34 +37,18 @@ def _lorentz(
 
     Notes
     -----
-    The Lorentz factor is calculated as :math:`1/(\\sin(2\\theta)|\\sin(\\eta)|)`,
-    where :math:`\\theta` is half the scattering angle and :math:`\\eta` is the
-    angle between the rotation axis and the scattering plane normal.
+    The Lorentz factor is calculated as :math:`1/|\\mathbf{\\omega}\\cdot\\mathbf{k}_{\\mathrm{in}}\\times\\mathbf{q}|`,
+    where :math:`\\mathbf{\\omega}` is the the rotation axis and :math:`\\mathbf{q}` is the scattering plane normal.
     """
+
+    # re-shape if single vector is given
     kp = k_out.reshape(-1, 3) if k_out.dim() == 1 else k_out
 
-    # Normalize k for dot product calculation
-    k_norm_sq = torch.linalg.norm(k_in) ** 2
-    k_kp_norm = torch.matmul(k_in, kp.T) / k_norm_sq
-    theta = torch.arccos(k_kp_norm) / 2.0
+    k_norm = torch.linalg.norm(k_in)
+    q = kp - k_in[None :]
+    l = k_norm**2/torch.matmul(torch.cross(k_in, rot_axis), q.T)
 
-    # Calculate korthogonal same way as in old version
-    korthogonal = kp - k_in.reshape(1, 3) * (k_kp_norm.reshape(-1, 1))
-    korth_norm = torch.linalg.norm(korthogonal, dim=1)
-    eta = torch.arccos(torch.matmul(rot_axis, korthogonal.T) / korth_norm)
-
-    # Apply tolerance conditions
-    tol = 0.5
-    condition = (
-        (torch.abs(torch.rad2deg(eta)) < tol)
-        | (torch.abs(torch.rad2deg(eta)) > 180 - tol)
-        | (torch.rad2deg(theta) < tol)
-    )
-
-    result = 1.0 / (torch.sin(2 * theta) * torch.abs(torch.sin(eta)))
-    result = torch.where(condition, torch.tensor(float("inf")), result)
-
-    return result.squeeze()  # Remove singleton dimensions for single vector input
+    return l
 
 
 def _polarization(k_out: torch.Tensor, pol_vec: torch.Tensor) -> torch.Tensor | float:
