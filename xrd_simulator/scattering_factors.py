@@ -46,11 +46,11 @@ def _lorentz(
 
     k_norm = torch.linalg.norm(k_in)
     q = kp - k_in[None :]
-    one_over_l = torch.matmul(torch.cross(k_in, rot_axis), q.T) * (1/k_norm**2)
+    one_over_l = torch.abs(torch.matmul(torch.cross(k_in, rot_axis), q.T) * (1/k_norm**2))
 
     # Avoiding div by zero errors
-    tol=torch.Tensor([0.5]) # Degrees
-    condition = one_over_l > 1 / torch.sin(torch.deg2rad(tol))
+    tol= 1 / np.sin(np.deg2rad(0.5)) # Degrees
+    condition = one_over_l > tol
     result = 1/one_over_l
     result = torch.where(condition, torch.tensor(float("inf")), result)
     return result.squeeze()

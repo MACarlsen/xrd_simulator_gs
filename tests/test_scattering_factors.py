@@ -27,7 +27,7 @@ class TestLorentz(unittest.TestCase):
         rot_axis = torch.tensor([0.0, 0.0, 1.0])
         
         lorentz = _lorentz(k_in, k_out, rot_axis)
-        
+        print(lorentz)
         # For 2theta=90°, theta=45°, sin(2theta)=1
         # eta is the angle between rotation axis and scattering plane normal
         # Lorentz should be finite and positive
@@ -82,17 +82,17 @@ class TestLorentz(unittest.TestCase):
         k_norm = 1e6
         angle = 0.5
 
-        k_in = torch.tensor([1.0, 0.0, 0.0])*k_norm
+        k_in = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32)*k_norm
         k_out = torch.tensor([
             [0.5, 0.5, 0.0],
             [0.5, 0.3, 0.4],
             [0.7, 0.7, 0.1],
             [0.5, 0.0, 0.5],
-        ])
+        ], dtype=torch.float32)
         k_out = k_out / torch.linalg.norm(k_out, axis=1)[:, None]*k_norm
         rot_axis = torch.tensor([np.sin(angle), 0.0, np.cos(angle)], dtype=torch.float32)
         lorentz = _lorentz(k_in, k_out, rot_axis)
-        assert torch.allclose(lorentz, torch.tensor([1.6115, 2.6858, 1.6197, float("inf")]))
+        assert torch.allclose(lorentz, torch.tensor([1.6115, 2.6858, 1.6197, float("inf")], dtype=torch.float32))
 
 
 class TestPolarization(unittest.TestCase):
