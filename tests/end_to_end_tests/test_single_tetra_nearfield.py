@@ -22,7 +22,7 @@ detector_distance = 0.5e4
 pixelsize =  10.0
 n_pixels = 2000
 rocking_axis = np.array([0, 1, 0])
-rocking_angle = 5.0 * np.pi / 180
+rocking_angle = 1.0 * np.pi / 180
 strain = -0.001*np.eye(3)
 strain = -0.000*np.array([[0,1,0],
                           [1,0,0],
@@ -186,7 +186,7 @@ def make_random_tensor(axis_1, axis_2):
 
 
 misorientation_tensor = make_random_tensor(
-    np.random.uniform(0.005, 0.005),
+    np.random.uniform(0.0001, 0.0001),
     np.random.uniform(0.0001, 0.0001),
 )
 
@@ -216,7 +216,7 @@ grain = GaussianGrainish(
     )
 grain_list.append(grain)
 
-gauss_polycrystal = GaussianPolycrystal(grain_list, max_misorientation = 0.005)
+gauss_polycrystal = GaussianPolycrystal(grain_list, max_misorientation = 0.001)
 
 gaussian_beam = GaussianBeam(
     xray_propagation_direction=np.array([1.0, 0.0, 0.0]),
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     axs[0].grid()
 
     img = axs[1].imshow(np.log10(f+1e0), cmap="jet")
-    img = axs[1].imshow(f, vmin =0, vmax = 2e4, cmap="jet")
+    img = axs[1].imshow(f, vmin =0, vmax = 1e5, cmap="jet")
     axs[1].set_title('Gaussian based_model')
     axs[1].grid()
     plt.show()
