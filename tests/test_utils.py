@@ -146,8 +146,9 @@ class TestUtils(unittest.TestCase):
         )
         B0 = tools.form_b_mat(unit_cell)
         strain_tensor1 = utils._strain_as_tensor(eps1)
-        B = utils._epsilon_to_b(strain_tensor1, B0)
-        eps2 = utils.ensure_numpy(utils._b_to_epsilon(B, B0))
+        B = utils.ensure_numpy(utils._epsilon_to_b(strain_tensor1, B0))
+        eps2 = utils._b_to_epsilon(B.reshape(1, 3, 3), B0)
+        eps2 = utils.ensure_numpy(eps2.squeeze())
         self.assertTrue(np.allclose(eps1, eps2))
 
     def test_get_misorientations(self):
@@ -226,6 +227,144 @@ class TestUtils(unittest.TestCase):
 
         # Verify function still works correctly (for backward compatibility)
         self.assertTrue(result, msg="0.3 should be contained in [0.0, 0.5]")
+
+    def test_reciprocal_metric_for_strain_conversion(self):
+        # Test reciprocal metric is preserved in strain mapping to
+        # recirprocal crystal basis matrix B. The idea is that this should
+        # work for Green-Lagrange strain defined as E = 0.5*(F.T@F -I)
+        # where I is idenity matrix and F the deformation gradient tensor.
+        # since it is possible to show that F = B^-T @ B0^T
+        # we have that C = F.T@F =  B0 @ B^-1 @ B^-T @ B0^T, and thus we have
+        # that B^-1 @ B^-T = B0^-1 @ (2*E + I) @ B0^-T and thus
+        # that B^T @ B = B0^T @ (2*E + I)^-1 @ B0 or equivalently
+        # that B^T @ B = B0^T @ C^-1 @ B0
+
+        unit_cell = [1.12365, 2.34897, 3.23874, 90.234, 110.12, 120.35]
+        B0 = tools.form_b_mat(unit_cell)
+
+        E = np.array(
+            [
+                [0.001, 0.004, -0.002],
+                [0.004, -0.0005, 0.003],
+                [-0.002, 0.003, 0.002],
+            ],
+        )
+
+        B = utils.ensure_numpy(utils._epsilon_to_b(E.reshape(1, 3, 3), B0).squeeze(0))
+
+        C = np.eye(3) + 2.0 * E
+
+        expected_reciprocal_metric = B0.T @ np.linalg.solve(C, B0)
+
+        actual_reciprocal_metric = B.T @ B
+
+        np.testing.assert_allclose(
+            actual_reciprocal_metric,
+            expected_reciprocal_metric,
+            atol=1e-12,
+            rtol=1e-12,
+        )
+
+        # let us also test a batch of strain tensors
+        E = np.concatenate(
+            [
+                E[None, :, :],
+                1.752 * E[None, :, :],
+                -2.234 * E[None, :, :],
+                -0.134 * E[None, :, :],
+            ],
+            axis=0,
+        )
+        E[-1, -1, -1] -= 0.00084237
+        E[-1, 0, 1] += 0.00124
+        E[-1, 1, 0] += 0.00124
+
+        B = utils._epsilon_to_b(E, B0).numpy()
+
+        self.assertEqual(B.shape[0], 4)
+        self.assertEqual(B.shape[1], 3)
+        self.assertEqual(B.shape[2], 3)
+
+        for i in range(B.shape[0]):
+            C = np.eye(3) + 2.0 * E[i]
+
+            expected_reciprocal_metric = B0.T @ np.linalg.solve(C, B0)
+
+            actual_reciprocal_metric = B[i].T @ B[i]
+
+            np.testing.assert_allclose(
+                actual_reciprocal_metric,
+                expected_reciprocal_metric,
+                atol=1e-12,
+                rtol=1e-12,
+            )
+
+    def test_zero_strain_returns_B0(self):
+        unit_cell = [1.12365, 2.34897, 3.23874, 90.234, 110.12, 120.35]
+        B0 = tools.form_b_mat(unit_cell)
+
+        B = utils.ensure_numpy(utils._epsilon_to_b(np.zeros((3, 3)), B0)).squeeze()
+
+        np.testing.assert_allclose(B, B0, atol=1e-12, rtol=1e-12)
+
+    def test_strain_B_batch_roundtrip(self):
+        unit_cell = [1.12365, 2.34897, 3.23874, 90.234, 110.12, 120.35]
+        B0 = tools.form_b_mat(unit_cell)
+
+        E = np.array(
+            [
+                [
+                    [0.01, 0.03, -0.02],
+                    [0.03, -0.01, 0.015],
+                    [-0.02, 0.015, 0.02],
+                ],
+                [
+                    [-0.02, -0.01, 0.025],
+                    [-0.01, 0.03, -0.02],
+                    [0.025, -0.02, 0.01],
+                ],
+            ]
+        )
+
+        B = utils._epsilon_to_b(E, B0)
+        recovered = utils._b_to_epsilon(B, B0)
+
+        for i in range(len(E)):
+            np.testing.assert_allclose(
+                utils._strain_as_tensor(recovered[i]),
+                E[i],
+                atol=1e-12,
+                rtol=1e-12,
+            )
+
+    def test_B_is_upper_triangular(self):
+        B0 = np.array(
+            [
+                [1.0, 0.2, -0.1],
+                [0.0, 1.3, 0.15],
+                [0.0, 0.0, 0.8],
+            ]
+        )
+
+        E = np.array(
+            [
+                [0.01, 0.02, -0.01],
+                [0.02, -0.005, 0.015],
+                [-0.01, 0.015, 0.02],
+            ]
+        )
+
+        B = utils.ensure_numpy(utils._epsilon_to_b(E, B0)).squeeze()
+
+        np.testing.assert_allclose(np.tril(B, -1), 0.0, atol=1e-14)
+        self.assertTrue(np.all(np.diag(B) > 0))
+
+    def test_epsilon_to_b_rejects_bad_strain(self):
+        B0 = np.eye(3)
+        E = np.diag([0.0, 0.0, -0.5])  # C = I + 2E is singular
+
+        with self.assertRaises(ValueError):
+            utils._epsilon_to_b(E, B0)
 
 
 if __name__ == "__main__":

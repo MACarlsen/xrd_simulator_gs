@@ -74,7 +74,6 @@ from __future__ import annotations
 
 import gc
 import logging
-from typing import Dict, List
 
 import numpy as np
 import torch
@@ -121,7 +120,7 @@ def _print_progress(progress_fraction, message):
         flush=True,
     )
     if progress_fraction == 1.0:
-        print("", flush=True)
+        print(flush=True)
 
 
 def _sample_convex_hull_3d(hull, n_samples):
@@ -297,7 +296,7 @@ def _set_xfab_logging(disabled):
         logging.getLogger("xfab." + sub_module).disabled = disabled
 
 
-class _verbose_manager(object):
+class _verbose_manager:
     """Manage global verbose options in with statements; to turn of
     external package loggings easily inside xrd_simulator.
     """
@@ -315,34 +314,68 @@ class _verbose_manager(object):
 
 
 def _strain_as_vector(strain_tensor):
-    return (
-        list(strain_tensor[0, :]) + list(strain_tensor[1, 1:]) + [strain_tensor[2, 2]]
-    )
+    strain_tensor = ensure_numpy(strain_tensor)
+    if strain_tensor.ndim == 2:
+        return np.array(
+            list(strain_tensor[0, :])
+            + list(strain_tensor[1, 1:])
+            + [strain_tensor[2, 2]]
+        )
+    elif strain_tensor.ndim == 3:
+        return np.array(
+            [
+                list(strain_tensor[i, 0, :])
+                + list(strain_tensor[i, 1, 1:])
+                + [strain_tensor[i, 2, 2]]
+                for i in range(strain_tensor.shape[0])
+            ]
+        )
+    else:
+        raise ValueError(
+            "Strain tensor must be 2D or 3D, got " + str(strain_tensor.ndim)
+        )
 
 
 def _epsilon_to_b(crystal_strain, B0):
-    """Handle large deformations as opposed to current xfab.tools.epsilon_to_b"""
-    # Convert to torch tensors first, using the configured device
+    """Convert Green-Lagrange strain to crystallographic B matrices."""
     crystal_strain = ensure_torch(crystal_strain)
     B0 = ensure_torch(B0)
-    device = get_selected_device()
 
-    C = 2 * crystal_strain + torch.eye(3, device=device)
+    if not torch.allclose(crystal_strain, crystal_strain.mT):
+        raise ValueError("Green-Lagrange strain must be symmetric")
+
+    # Green-Lagrange strain:
+    # E = 0.5 * (F.T @ F - I)
+    #
+    # Since F = B^-T @ B0^T:
+    #
+    # C = F.T @ F
+    #   = B0 @ B^-1 @ B^-T @ B0.T
+    #
+    # Therefore:
+    #
+    # B.T @ B = B0.T @ C^-1 @ B0
+
+    I = torch.eye(
+        3,
+        dtype=crystal_strain.dtype,
+        device=crystal_strain.device,
+    )
+    C = I + 2.0 * crystal_strain
 
     eigen_vals = torch.linalg.eigvalsh(C)
-    if torch.any(eigen_vals < 0):
+    if torch.any(eigen_vals <= 0):
         raise ValueError(
-            "Unfeasible strain tensor with value: "
-            + str(_strain_as_vector(crystal_strain))
-            + ", will invert the unit cell with negative deformation gradient tensor determinant"
+            "The right Cauchy-Green deformation tensor C = F.T @ F "
+            "must be positive definite"
         )
-    if C.ndim == 3:
-        F = torch.transpose(torch.linalg.cholesky(C), 2, 1)
-    else:
-        F = torch.transpose(torch.linalg.cholesky(C), 1, 0)
 
-    B = torch.matmul(torch.linalg.inv(F), B0)
-    return B
+    BTB = B0.mT.reshape(1, 3, 3) @ torch.linalg.solve(
+        C,
+        B0.reshape(-1, 3, 3),
+    )
+
+    return torch.linalg.cholesky(BTB).mT
 
 
 def _b_to_epsilon(B_matrix, B0):
@@ -353,8 +386,11 @@ def _b_to_epsilon(B_matrix, B0):
     B_matrix = ensure_torch(B_matrix)
     B0 = ensure_torch(B0)
 
-    F = torch.matmul(B0, torch.linalg.inv(B_matrix))
-    strain_tensor = 0.5 * (torch.matmul(F.T, F) - torch.eye(3))  # large deformations
+    FT = torch.matmul(B0, torch.linalg.inv(B_matrix))
+    C = torch.matmul(FT, FT.mT)
+
+    strain_tensor = 0.5 * (C - torch.eye(3, dtype=C.dtype, device=C.device))
+
     return _strain_as_vector(strain_tensor)
 
 
@@ -633,7 +669,7 @@ def print_memory_report(
     include_cpu: bool = True,
     include_cuda: bool = True,
     limit: int | None = 5,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Print VRAM/CPU tensor usage and list top tensors with names when available."""
     if torch is None:
         print("torch not available; no tensors to report.")
@@ -676,7 +712,7 @@ def print_memory_report(
         return f"<tensor@{hex(id(t))}>"
 
     # Collect tensors
-    tensors: List[Dict[str, object]] = []
+    tensors: list[dict[str, object]] = []
     for obj in gc.get_objects():
         try:
             if isinstance(obj, torch.Tensor):
@@ -728,7 +764,7 @@ def print_memory_report(
     return report
 
 
-def return_device_memory() -> Dict[str, float]:
+def return_device_memory() -> dict[str, float]:
     """Return available and free memory for the current device (CUDA or CPU)."""
     if torch is None:
         return {"device": "none", "available_gb": 0.0, "free_gb": 0.0}
