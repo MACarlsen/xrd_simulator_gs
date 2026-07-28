@@ -85,7 +85,7 @@ class TestUtils(unittest.TestCase):
         unit_cell = [5.028, 5.028, 5.519, 90.0, 90.0, 120.0]
 
         B0 = tools.form_b_mat(unit_cell)
-        B = utils._lab_strain_to_B_matrix(strain_tensor, U, B0)
+        B = utils._lab_strain_to_B_matrix(strain_tensor, U, B0).squeeze()
 
         n_c = np.random.rand(
             3,
@@ -337,27 +337,72 @@ class TestUtils(unittest.TestCase):
                 rtol=1e-12,
             )
 
-    def test_B_is_upper_triangular(self):
+    def test_lab_strain_preserves_principal_reflection_direction(self):
         B0 = np.array(
             [
-                [1.0, 0.2, -0.1],
-                [0.0, 1.3, 0.15],
-                [0.0, 0.0, 0.8],
-            ]
+                [5.0, -0.8, 0.4],
+                [0.0, 4.2, 0.7],
+                [0.0, 0.0, 3.6],
+            ],
+            dtype=float,
         )
 
-        E = np.array(
+        U = Rotation.from_rotvec([0.4, -0.2, 0.3]).as_matrix()
+        hkl = np.array([1.0, 1.0, 1.0])
+
+        G0_lab = U @ B0 @ hkl
+        n_lab = G0_lab / np.linalg.norm(G0_lab)
+
+        axial_strain = 0.1
+        transverse_strain = -0.05
+
+        E_lab = transverse_strain * np.eye(3) + (
+            axial_strain - transverse_strain
+        ) * np.outer(n_lab, n_lab)
+
+        B = utils.ensure_numpy(utils._lab_strain_to_B_matrix(E_lab, U, B0)).squeeze()
+
+        G_lab = U @ B @ hkl
+
+        np.testing.assert_allclose(
+            G_lab / np.linalg.norm(G_lab),
+            G0_lab / np.linalg.norm(G0_lab),
+            atol=1e-12,
+            rtol=1e-12,
+        )
+
+    def test_B_preserves_principal_reflection_direction_general_lattice(self):
+        B0 = np.array(
             [
-                [0.01, 0.02, -0.01],
-                [0.02, -0.005, 0.015],
-                [-0.01, 0.015, 0.02],
-            ]
+                [5.0, -0.8, 0.4],
+                [0.0, 4.2, 0.7],
+                [0.0, 0.0, 3.6],
+            ],
+            dtype=float,
+        )
+
+        hkl = np.array([1.0, 1.0, 1.0])
+
+        G0 = B0 @ hkl
+        n = G0 / np.linalg.norm(G0)
+
+        # Axisymmetric Green-Lagrange strain with n as a principal direction.
+        axial_strain = 0.1
+        transverse_strain = -0.5 * axial_strain
+
+        E = axial_strain * np.outer(n, n) + transverse_strain * (
+            np.eye(3) - np.outer(n, n)
         )
 
         B = utils.ensure_numpy(utils._epsilon_to_b(E, B0)).squeeze()
 
-        np.testing.assert_allclose(np.tril(B, -1), 0.0, atol=1e-14)
-        self.assertTrue(np.all(np.diag(B) > 0))
+        G = B @ hkl
+
+        assert np.allclose(
+            G / np.linalg.norm(G),
+            G0 / np.linalg.norm(G0),
+            atol=1e-12,
+        )
 
     def test_epsilon_to_b_rejects_bad_strain(self):
         B0 = np.eye(3)

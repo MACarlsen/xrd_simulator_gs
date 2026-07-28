@@ -7,25 +7,26 @@ This module provides the Polycrystal class which handles:
 - Spatial transformations
 - Crystal orientations and strains
 """
+
 from __future__ import annotations
 
-from typing import Dict
 import copy
+
+import dill
 import numpy as np
 import numpy.typing as npt
 import torch
 from torch import Tensor
-import dill
 from xfab import tools
 
-from xrd_simulator import utils, laue
-from xrd_simulator.scattering_factors import _lorentz, _polarization, _scherrer
-from xrd_simulator.utils import ensure_torch, ensure_numpy, _compute_tetrahedra_volumes
+from xrd_simulator import laue, utils
 from xrd_simulator.beam import Beam
 from xrd_simulator.detector import Detector
-from xrd_simulator.motion import RigidBodyMotion
 from xrd_simulator.mesh import TetraMesh
+from xrd_simulator.motion import RigidBodyMotion
 from xrd_simulator.phase import Phase
+from xrd_simulator.scattering_factors import _lorentz, _polarization, _scherrer
+from xrd_simulator.utils import ensure_numpy, ensure_torch
 
 torch.set_default_dtype(torch.float64)
 
@@ -118,7 +119,7 @@ class Polycrystal:
         max_bragg_angle: float = 90 * np.pi / 180,
         detector: Detector | None = None,
         verbose: bool = True,
-    ) -> Dict[str, Tensor | list]:
+    ) -> dict[str, Tensor | list]:
         """Compute diffraction from the rotating and translating polycrystal.
 
         Simulates diffraction while the sample is illuminated by an X-ray beam.
@@ -165,13 +166,17 @@ class Polycrystal:
         peaks = self._compute_peaks(beam, rigid_body_motion, verbose=verbose)
 
         # Filter peaks by beam illumination using source positions
-        source_points = peaks[:, 16:19].T  # Get source points (x,y,z) and transpose for contains method
+        source_points = peaks[
+            :, 16:19
+        ].T  # Get source points (x,y,z) and transpose for contains method
         illuminated_peaks = beam._contains(source_points)
         peaks = peaks[illuminated_peaks]
 
         # Add peak indices as a unique identifier for each peak
         peak_indices = torch.arange(len(peaks), device=peaks.device).unsqueeze(1)
-        peaks = torch.cat([peaks, peak_indices], dim=1)  # Add peak_index column (now column 24)
+        peaks = torch.cat(
+            [peaks, peak_indices], dim=1
+        )  # Add peak_index column (now column 24)
 
         """
             Column names of peaks are
@@ -182,14 +187,14 @@ class Polycrystal:
             4: 'l'                  14: 'K_out_y'   24: 'peak_index'
             5: 'structure_factors'  15: 'K_out_z'
             6: 'diffraction_times'  16: 'Source_x'
-            7: 'G0_x'               17: 'Source_y'      
+            7: 'G0_x'               17: 'Source_y'
             8: 'G0_y'               18: 'Source_z'
-            9: 'G0_z'               19: 'lorentz_factors'           
+            9: 'G0_z'               19: 'lorentz_factors'
         """
 
         column_names = [
             "grain_index",
-            "phase_number", 
+            "phase_number",
             "h",
             "k",
             "l",
@@ -199,7 +204,7 @@ class Polycrystal:
             "G0_y",
             "G0_z",
             "Gx",
-            "Gy", 
+            "Gy",
             "Gz",
             "K_out_x",
             "K_out_y",
@@ -212,7 +217,7 @@ class Polycrystal:
             "volumes",
             "2theta",
             "scherrer_fwhm",
-            "peak_index"  # Unique identifier for each diffraction peak
+            "peak_index",  # Unique identifier for each diffraction peak
         ]
 
         # Wrap the peaks columns into a dict to preserve information
@@ -284,7 +289,6 @@ class Polycrystal:
 
         # For each phase of the sample, we compute all reflections at once in a vectorized manner
         for i, phase in enumerate(phases):
-
             # Get all scatterers belonging to one phase at a time, and the corresponding miller indices.
             grain_indices = torch.where(element_phase_map == i)[0]
             miller_indices = ensure_torch(phase.miller_indices)
@@ -391,12 +395,12 @@ class Polycrystal:
             1: 'phase_number'       11: 'Gy'        21: 'volumes'
             2: 'h'                  12: 'Gz'        22: '2theta'
             3: 'k'                  13: 'K_out_x'   23: 'scherrer_fwhm'
-            4: 'l'                  14: 'K_out_y'   
+            4: 'l'                  14: 'K_out_y'
             5: 'structure_factors'  15: 'K_out_z'
             6: 'diffraction_times'  16: 'Source_x'
-            7: 'G0_x'               17: 'Source_y'      
+            7: 'G0_x'               17: 'Source_y'
             8: 'G0_y'               18: 'Source_z'
-            9: 'G0_z'               19: 'lorentz_factors'           
+            9: 'G0_z'               19: 'lorentz_factors'
         """
 
         return peaks
@@ -422,11 +426,11 @@ class Polycrystal:
         Rot_mat = rigid_body_motion.rotator.get_rotation_matrix(
             rigid_body_motion.rotation_angle * time
         )
-        
+
         # Ensure Rot_mat has batch dimension for proper broadcasting
         if Rot_mat.ndim == 2:
             Rot_mat = Rot_mat.unsqueeze(0)  # (3, 3) -> (1, 3, 3)
-        
+
         self.orientation_lab = torch.matmul(Rot_mat, self.orientation_lab)
         self.strain_lab = torch.matmul(
             torch.matmul(Rot_mat, self.strain_lab), Rot_mat.transpose(2, 1)
@@ -494,7 +498,7 @@ class Polycrystal:
             self.mesh_sample.save(xdmf_path, element_data=element_data)
 
     @classmethod
-    def load(cls, path: str) -> "Polycrystal":
+    def load(cls, path: str) -> Polycrystal:
         """Load polycrystal from disc via pickling.
 
         Parameters
@@ -530,7 +534,7 @@ class Polycrystal:
             loaded.element_phase_map = ensure_torch(
                 loaded.element_phase_map, dtype=torch.float64
             )
-            loaded._eB = ensure_torch(loaded._eB)
+
             loaded.mesh_lab = cls._move_mesh_to_torch(loaded.mesh_lab)
             loaded.mesh_sample = cls._move_mesh_to_torch(loaded.mesh_sample)
             loaded.strain_sample = ensure_torch(
@@ -539,6 +543,16 @@ class Polycrystal:
             loaded.orientation_sample = ensure_torch(
                 loaded.orientation_sample, dtype=torch.float64
             )
+
+            loaded._eB = loaded._instantiate_eB(
+                loaded.orientation_lab,
+                loaded.strain_lab,
+                loaded.phases,
+                loaded.element_phase_map,
+                loaded.mesh_lab,
+            )
+            loaded._eB = ensure_torch(loaded._eB)
+
             return loaded
 
     def _instantiate_orientation(
@@ -639,7 +653,8 @@ class Polycrystal:
     ) -> Tensor:
         """Compute per-element 3x3 B matrices mapping hkl to crystal coordinates.
 
-        These are upper triangular matrices such that ``G_s = U * B * G_hkl``
+        These are reciprocal-basis matrices expressed in a fixed reference
+        crystal frame, such that ``G_s = U * B * G_hkl``
         where ``G_hkl = [h, k, l]`` are lattice plane Miller indices, ``G_s``
         is the sample frame diffraction vector, and ``U`` are the crystal
         element orientation matrices.
@@ -712,14 +727,14 @@ class Polycrystal:
             source_point = torch.mean(mesh_nodes_contained_by_beam, dim=0)
         else:
             source_point = ensure_torch(self.mesh_lab.centroid)
-        
+
         max_bragg_angle = detector._get_wrapping_cone(
             beam.wave_vector, source_point
         ).item()
 
-        assert (
-            min_bragg_angle >= 0
-        ), "min_bragg_angle must be greater or equal than zero"
+        assert min_bragg_angle >= 0, (
+            "min_bragg_angle must be greater or equal than zero"
+        )
         assert max_bragg_angle > min_bragg_angle, (
             "max_bragg_angle "
             + str(np.degrees(max_bragg_angle))

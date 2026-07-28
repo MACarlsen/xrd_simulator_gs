@@ -259,8 +259,7 @@ def _lab_strain_to_B_matrix(
     Returns
     -------
     torch.Tensor
-        B matrix mapping from hkl Miller indices to realspace crystal
-        coordinates, shape ``(n, 3, 3)``.
+        B matrix mapping Miller indices to reciprocal-space crystal coordinates, shape ``(n, 3, 3)``.
     """
     # Convert to torch tensors first, using the configured device
     strain_tensor = ensure_torch(strain_tensor)
@@ -277,7 +276,7 @@ def _lab_strain_to_B_matrix(
         torch.matmul(strain_tensor, crystal_orientation),
     )
     B = _epsilon_to_b(crystal_strain, B0)
-    return B.squeeze()
+    return B
 
 
 def _set_xfab_logging(disabled):
@@ -337,24 +336,29 @@ def _strain_as_vector(strain_tensor):
 
 
 def _epsilon_to_b(crystal_strain, B0):
-    """Convert Green-Lagrange strain to crystallographic B matrices."""
+    """Apply Green-Lagrange strain to a reciprocal basis.
+
+    The returned reciprocal basis is expressed in the fixed reference
+    crystal frame and is not generally upper triangular.
+    """
     crystal_strain = ensure_torch(crystal_strain)
     B0 = ensure_torch(B0)
 
     if not torch.allclose(crystal_strain, crystal_strain.mT):
         raise ValueError("Green-Lagrange strain must be symmetric")
 
-    # Green-Lagrange strain:
-    # E = 0.5 * (F.T @ F - I)
+    # Green-Lagrange strain determines
     #
-    # Since F = B^-T @ B0^T:
+    # C = F.T @ F = I + 2E,
     #
-    # C = F.T @ F
-    #   = B0 @ B^-1 @ B^-T @ B0.T
+    # but does not determine the rigid-body rotation in F.
+    # Choosing zero rigid-body rotation gives
     #
-    # Therefore:
+    # F = C^0.5.
     #
-    # B.T @ B = B0.T @ C^-1 @ B0
+    # Reciprocal basis vectors transform as
+    #
+    # B = F^-T @ B0 = C^-0.5 @ B0.
 
     I = torch.eye(
         3,
@@ -363,33 +367,39 @@ def _epsilon_to_b(crystal_strain, B0):
     )
     C = I + 2.0 * crystal_strain
 
-    eigen_vals = torch.linalg.eigvalsh(C)
+    eigen_vals, eigen_vecs = torch.linalg.eigh(C)
+
     if torch.any(eigen_vals <= 0):
         raise ValueError(
             "The right Cauchy-Green deformation tensor C = F.T @ F "
             "must be positive definite"
         )
 
-    BTB = B0.mT.reshape(1, 3, 3) @ torch.linalg.solve(
-        C,
-        B0.reshape(-1, 3, 3),
-    )
+    C_inv_sqrt = eigen_vecs @ torch.diag_embed(eigen_vals.rsqrt()) @ eigen_vecs.mT
 
-    return torch.linalg.cholesky(BTB).mT
+    return C_inv_sqrt @ B0
 
 
 def _b_to_epsilon(B_matrix, B0):
-    """Handle large deformations as opposed to current xfab.tools.b_to_epsilon.
-
-    Inverse operation of _epsilon_to_b.
-    """
+    """Convert reciprocal-lattice matrices to Green-Lagrange strain."""
     B_matrix = ensure_torch(B_matrix)
     B0 = ensure_torch(B0)
 
-    FT = torch.matmul(B0, torch.linalg.inv(B_matrix))
-    C = torch.matmul(FT, FT.mT)
+    # B = F^-T @ B0
+    #
+    # Therefore:
+    #
+    # F.T = B0 @ B^-1
 
-    strain_tensor = 0.5 * (C - torch.eye(3, dtype=C.dtype, device=C.device))
+    FT = torch.linalg.solve(B_matrix.mT, B0.mT).mT
+    C = FT @ FT.mT
+
+    I = torch.eye(
+        3,
+        dtype=C.dtype,
+        device=C.device,
+    )
+    strain_tensor = 0.5 * (C - I)
 
     return _strain_as_vector(strain_tensor)
 
