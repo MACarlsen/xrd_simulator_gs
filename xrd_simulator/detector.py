@@ -18,6 +18,7 @@ import dill
 import numpy as np
 import numpy.typing as npt
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 from scipy.special import j1
 
@@ -176,6 +177,8 @@ class Detector:
         self.lorentz_factor = use_lorentz
         self.polarization_factor = use_polarization
         self.structure_factor = use_structure_factor
+        self.shape = self.pixel_coordinates.shape[:2]
+
 
     def save(self, path: str) -> None:
         """Save detector to disk.
@@ -396,6 +399,63 @@ class Detector:
             bounds.
         """
         return (zd >= 0) & (zd <= self.zmax) & (yd >= 0) & (yd <= self.ymax)
+
+
+    def render_gaussian_splats(
+            self,
+            uv_corrds: Tensor,
+            scale_factors: Tensor,
+            concentration_tensors: Tensor,
+            patch_size: int = 32,
+        ):
+        """ Basic 2D Gaussian rasterizer. Each gaussian has the expression:
+
+        .. math:: f = s \exp(-[u-u_0, v-v_0] S [u-u_0, v-v_0]^T).
+
+        Parameters
+        ----------
+        uv_corrds : Tensor
+            Centroid pixel coordinates, shape ``(N, 2)``
+        scale_factors : Tensor
+            Intensity scale factors, shape ``(N,)``
+        concentration_tensors : Tensor
+            Shape concentration tensors, shape ``(N, 2, 2)``
+        patch_size : int
+            For evaluation the detector is split into patches of shize `patch_size` by `patch_size`.
+
+        Returns
+        -------
+        detector_image : Tensor
+            Detector image, shape ``self.shape``.
+        """
+
+        shape = self.shape
+        u, v = torch.meshgrid(torch.arange(shape[0]), torch.arange(shape[1]))
+        f = torch.zeros(shape)
+
+        n_patches_dim1 = (shape[0]-1)//patch_size+1
+        n_patches_dim2 = (shape[1]-1)//patch_size+1
+
+        for patch_index_1 in range(n_patches_dim1):
+            for patch_index_2 in range(n_patches_dim2):
+
+                patch_slice = (slice(patch_size*patch_index_1, patch_size*(patch_index_1+1)),
+                               slice(patch_size*patch_index_2, patch_size*(patch_index_2+1)),)
+
+                patch_center = torch.Tensor([(patch_index_1+0.5)*patch_size, (patch_index_2+0.5)*patch_size]) 
+                distance = patch_center[None, :] - uv_corrds
+                scaled_distace = torch.einsum('su,suv,sv->s', distance, concentration_tensors, distance)
+                include_index = torch.logical_or(scaled_distace < 6, torch.sum(distance**2, axis=1) < (2 * patch_size)**2)
+
+                local_coords = torch.stack([u[patch_slice][None, :, :] - uv_corrds[include_index, 0, None, None],
+                                            v[patch_slice][None, :, :] - uv_corrds[include_index, 1, None, None],
+                                            ], axis=1)
+
+                f[patch_slice] =  torch.sum(scale_factors[include_index, None, None]\
+                    * torch.exp(- torch.einsum('xiuv,xij,xjuv->xuv' ,local_coords, concentration_tensors[include_index, :, :], local_coords)), axis=0)
+                # f[patch_slice] = torch.sum(include_index)
+
+        return f
 
     # ------------------------------------------------------------------
     # 3. Geometry & coordinate helpers
